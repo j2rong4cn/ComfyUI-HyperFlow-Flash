@@ -105,6 +105,22 @@ class FactorizedPlan:
                 yield name, self._out_in(modules[name]), self._like(modules[name])
 
     def install(self, model: PackedModel, ops) -> int:
+        def load_linear(linear: nn.Module, state: dict[str, torch.Tensor]) -> None:
+            weight = state.get("weight")
+            # Keep unquantized safetensors weights (e.g. bf16 low-rank factors) in their mmap dtype on CPU
+            # instead of letting MixedPrecisionOps cast them to float32 at load time; forward/cast_bias_weight
+            # converts on GPU when needed.
+            if (
+                weight is not None
+                and len(state) == 1
+                and hasattr(linear, "comfy_cast_weights")
+                and not hasattr(weight, "tensor_type")
+            ):
+                linear.weight = nn.Parameter(weight, requires_grad=False)
+                return
+            linear.load_state_dict(state, strict=False)
+
+        installed = len(self.parts)
         for block_index, modules in self.parts.items():
             block = model.blocks[block_index]
 
@@ -113,14 +129,14 @@ class FactorizedPlan:
                 if "weight" in part:
                     out_features, in_features = _shape(part["weight"])
                     linear = ops.Linear(in_features, out_features, bias=False, dtype=dtype)
-                    linear.load_state_dict(part, strict=False)
+                    load_linear(linear, part)
                     return linear
                 rank, in_features = _shape(part["down"])
                 out_features = _shape(part["up"])[0]
                 down = ops.Linear(in_features, rank, bias=False, dtype=dtype)
                 up = ops.Linear(rank, out_features, bias=False, dtype=dtype)
-                down.load_state_dict({"weight": part["down"]}, strict=False)
-                up.load_state_dict({"weight": part["up"]}, strict=False)
+                load_linear(down, {"weight": part["down"]})
+                load_linear(up, {"weight": part["up"]})
                 return LowRankLinear(down, up)
 
             if any(name in modules for name in QKV_PARTS):
@@ -132,7 +148,8 @@ class FactorizedPlan:
                     setattr(block.mlp, name.split(".")[1], build(name))
             if "mlp.fc2" in modules:
                 block.mlp.__class__ = FactorizedMLP
-        return len(self.parts)
+        self.parts.clear()
+        return installed
 
 
 class EndpointState:

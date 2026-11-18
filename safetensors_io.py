@@ -58,10 +58,10 @@ def checked_info(path: str) -> dict:
     return info
 
 
-def placeholder(like: torch.Tensor, shape: tuple[int, ...]) -> torch.Tensor:
-    """A zero-stride bf16 weight: ComfyUI keeps it without a copy at this model's bf16 compute dtype."""
+def placeholder(like: torch.Tensor, shape: tuple[int, ...], dtype: torch.dtype = torch.bfloat16) -> torch.Tensor:
+    """A zero-stride weight matching the model's compute dtype so ComfyUI keeps it without a copy."""
     del like
-    return torch.zeros((), dtype=torch.bfloat16).expand(shape)
+    return torch.zeros((), dtype=dtype).expand(shape)
 
 
 def float32_tensors(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:

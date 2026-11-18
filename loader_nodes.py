@@ -6,6 +6,7 @@ import functools
 import logging
 from types import SimpleNamespace
 
+import comfy.model_management
 import comfy.sd
 import comfy.utils
 import folder_paths
@@ -173,7 +174,10 @@ def load_hyperflow_safetensors(path: str, disable_dynamic: bool = False):
     gate, sigmas, endpoint_sd = pop_extras(state_dict)
     if gate is None or sigmas is None or not endpoint_sd:
         raise RuntimeError(f"{path} has HyperFlow metadata but no step-endpoint tensors")
-    plan = FactorizedPlan(state_dict, safetensors_io.placeholder)
+    compute_dtype = comfy.model_management.unet_manual_cast(
+        None, comfy.model_management.get_torch_device(), [torch.bfloat16, torch.float32]
+    )
+    plan = FactorizedPlan(state_dict, functools.partial(safetensors_io.placeholder, dtype=compute_dtype))
     full_precision = safetensors_io.float32_tensors(state_dict)
     patcher = comfy.sd.load_diffusion_model_state_dict(
         state_dict, model_options={}, metadata=metadata, disable_dynamic=disable_dynamic
